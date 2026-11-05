@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/TelegramChatExporter/TelegramChatExporter.csproj" />
+  <Project Path="tests/TelegramChatExporter.Tests/TelegramChatExporter.Tests.csproj" />
+</Solution>
