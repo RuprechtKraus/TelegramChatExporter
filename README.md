@@ -103,4 +103,4 @@ GitHub Actions выполняет сборку и тесты на Windows и Lin
 
 ### Статус первоначальной проверки
 
-JSON и XML проектов проверены. Сборка и тесты в среде подготовки не запускались: .NET SDK отсутствует, загрузка SDK/NuGet недоступна. Workflow включён в проект и запустится после загрузки в GitHub. Авторизация Telegram не проверялась.
+Сборка Release и 9 тестов успешно прошли на Windows и Linux в [GitHub Actions](https://github.com/RuprechtKraus/TelegramChatExporter/actions/runs/42055810299). Авторизация и экспорт из реального аккаунта Telegram не проверялись: для этого нужны ваши API-реквизиты и вход в аккаунт.
