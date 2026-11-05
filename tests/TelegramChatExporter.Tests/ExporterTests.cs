@@ -1,14 +1,18 @@
 using System.Text.Json;
 using TL;
-using Xunit;
+using NUnit.Framework;
 
 namespace TelegramChatExporter.Tests;
 
-public sealed class ExporterTests : IDisposable
+[TestFixture]
+public sealed class ExporterTests
 {
-    private readonly string directory = Path.Combine(Path.GetTempPath(), "tce-tests-" + Guid.NewGuid());
+    private string directory = null!;
 
-    [Fact]
+    [SetUp]
+    public void SetUp() => directory = Path.Combine(Path.GetTempPath(), "tce-tests-" + Guid.NewGuid());
+
+    [Test]
     public async Task WritesOnlyRequestedFieldsAndPreservesUnicodeAndUtc()
     {
         var message = new ExportMessage(new DateTimeOffset(2026, 11, 5, 12, 30, 0, TimeSpan.Zero),
@@ -16,65 +20,64 @@ public sealed class ExporterTests : IDisposable
         var result = await JsonExporter.ExportAsync(directory, "Чат:/вопрос?", Items(message));
         using var json = JsonDocument.Parse(await File.ReadAllTextAsync(result.Path));
         var item = json.RootElement[0];
-        Assert.Equal(new[] { "time", "sender", "text" }, item.EnumerateObject().Select(p => p.Name));
-        Assert.Equal(message.Time, item.GetProperty("time").GetDateTimeOffset());
-        Assert.Equal(message.Sender, item.GetProperty("sender").GetString());
-        Assert.Equal(message.Text, item.GetProperty("text").GetString());
-        Assert.Equal(1, result.Count);
-        Assert.StartsWith("Чат__вопрос__", Path.GetFileName(result.Path));
+        Assert.That(item.EnumerateObject().Select(p => p.Name), Is.EqualTo(new[] { "time", "sender", "text" }));
+        Assert.That(item.GetProperty("time").GetDateTimeOffset(), Is.EqualTo(message.Time));
+        Assert.That(item.GetProperty("sender").GetString(), Is.EqualTo(message.Sender));
+        Assert.That(item.GetProperty("text").GetString(), Is.EqualTo(message.Text));
+        Assert.That(result.Count, Is.EqualTo(1));
+        Assert.That(Path.GetFileName(result.Path), Does.StartWith("Чат__вопрос__"));
     }
 
-    [Fact]
+    [Test]
     public async Task EmptyChatProducesEmptyJsonArray()
     {
         var result = await JsonExporter.ExportAsync(directory, "Empty", Items());
-        Assert.Equal("[]", (await File.ReadAllTextAsync(result.Path)).Trim());
-        Assert.Equal(0, result.Count);
+        Assert.That((await File.ReadAllTextAsync(result.Path)).Trim(), Is.EqualTo("[]"));
+        Assert.That(result.Count, Is.Zero);
     }
 
-    [Fact]
+    [Test]
     public async Task FailedExportLeavesNoPartialOrFinalFile()
     {
-        await Assert.ThrowsAsync<IOException>(() => JsonExporter.ExportAsync(directory, "Failed", Failing()));
-        Assert.Empty(Directory.GetFiles(directory));
+        await Assert.ThatAsync(() => JsonExporter.ExportAsync(directory, "Failed", Failing()), Throws.TypeOf<IOException>());
+        Assert.That(Directory.GetFiles(directory), Is.Empty);
     }
 
-    [Fact]
+    [Test]
     public async Task CancellationLeavesNoPartialOrFinalFile()
     {
         using var cts = new CancellationTokenSource();
         cts.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => JsonExporter.ExportAsync(directory, "Cancel", Items(), cts.Token));
-        Assert.Empty(Directory.GetFiles(directory));
+        await Assert.ThatAsync(() => JsonExporter.ExportAsync(directory, "Cancel", Items(), cts.Token), Throws.InstanceOf<OperationCanceledException>());
+        Assert.That(Directory.GetFiles(directory), Is.Empty);
     }
 
-    [Fact]
+    [Test]
     public void OutgoingPrivateMessageUsesCurrentUserInsteadOfRecipient()
     {
         var me = new User { id = 1, first_name = "Я" };
         var other = new User { id = 2, first_name = "Собеседник" };
         var message = new Message { peer_id = new PeerUser { user_id = 2 }, flags = Message.Flags.out_,
             date = new DateTime(2026, 11, 5), message = "Привет" };
-        Assert.Equal("Я", TelegramHistory.Map(message, me, _ => other).Sender);
+        Assert.That(TelegramHistory.Map(message, me, _ => other).Sender, Is.EqualTo("Я"));
         message.flags = 0;
-        Assert.Equal("Собеседник", TelegramHistory.Map(message, me, _ => other).Sender);
+        Assert.That(TelegramHistory.Map(message, me, _ => other).Sender, Is.EqualTo("Собеседник"));
     }
 
-    [Fact]
+    [Test]
     public void ChannelSignatureAndUnknownSenderArePreserved()
     {
         var message = new Message { peer_id = new PeerChannel { channel_id = 42 }, post_author = "Автор",
             date = new DateTime(2026, 11, 5), message = "Пост" };
-        Assert.Contains("Автор", TelegramHistory.Map(message, new User(), _ => null).Sender);
+        Assert.That(TelegramHistory.Map(message, new User(), _ => null).Sender, Does.Contain("Автор"));
         message.from_id = new PeerUser { user_id = 77 };
-        Assert.Contains("77", TelegramHistory.Map(message, new User(), _ => null).Sender);
+        Assert.That(TelegramHistory.Map(message, new User(), _ => null).Sender, Does.Contain("77"));
     }
 
-    [Theory]
-    [InlineData("CON", "_CON")]
-    [InlineData("...", "Chat")]
-    [InlineData("a/b:c?", "a_b_c_")]
-    public void SanitizesWindowsFileNames(string name, string expected) => Assert.Equal(expected, JsonExporter.SafeChatName(name));
+    [TestCase("CON", "_CON")]
+    [TestCase("...", "Chat")]
+    [TestCase("a/b:c?", "a_b_c_")]
+    public void SanitizesWindowsFileNames(string name, string expected) => Assert.That(JsonExporter.SafeChatName(name), Is.EqualTo(expected));
 
     private static async IAsyncEnumerable<ExportMessage> Items(params ExportMessage[] messages)
     {
@@ -89,7 +92,8 @@ public sealed class ExporterTests : IDisposable
         throw new IOException("Simulated network failure");
     }
 
-    public void Dispose()
+    [TearDown]
+    public void TearDown()
     {
         if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
     }
