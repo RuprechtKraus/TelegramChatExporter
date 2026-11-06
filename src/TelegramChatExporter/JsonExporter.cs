@@ -6,6 +6,8 @@ using System.Text.Json.Serialization;
 namespace TelegramChatExporter;
 
 public sealed record ExportMessage(
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("replyToMessageId")] int? ReplyToMessageId,
     [property: JsonPropertyName("time")] DateTimeOffset Time,
     [property: JsonPropertyName("sender")] string Sender,
     [property: JsonPropertyName("text")] string Text);

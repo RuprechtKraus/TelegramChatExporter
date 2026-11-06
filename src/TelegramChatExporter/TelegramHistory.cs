@@ -43,7 +43,12 @@ public static class TelegramHistory
             : resolve(senderPeer) is { } info ? DisplayName(info) : senderPeer.ToString();
         if (message.from_id is null && message.peer_id is PeerChannel && !string.IsNullOrWhiteSpace(message.post_author))
             sender = $"{sender} ({message.post_author})";
-        return new ExportMessage(new DateTimeOffset(DateTime.SpecifyKind(message.date, DateTimeKind.Utc)),
+        // Use the direct reply target, not reply_to_top_id (the thread root).
+        // Missing targets remain references even when the original message is not exported.
+        int? replyToMessageId = message.reply_to is MessageReplyHeader { reply_to_msg_id: > 0 } reply
+            ? reply.reply_to_msg_id
+            : null;
+        return new ExportMessage(message.id, replyToMessageId, new DateTimeOffset(DateTime.SpecifyKind(message.date, DateTimeKind.Utc)),
             sender ?? "Неизвестный отправитель", message.message ?? "");
     }
 

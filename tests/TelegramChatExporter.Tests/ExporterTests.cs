@@ -15,12 +15,14 @@ public sealed class ExporterTests
     [Test]
     public async Task WritesOnlyRequestedFieldsAndPreservesUnicodeAndUtc()
     {
-        var message = new ExportMessage(new DateTimeOffset(2026, 11, 5, 12, 30, 0, TimeSpan.Zero),
+        var message = new ExportMessage(125, 120, new DateTimeOffset(2026, 11, 5, 12, 30, 0, TimeSpan.Zero),
             "Иван", "Привет 👋\n\"текст\"");
         var result = await JsonExporter.ExportAsync(directory, "Чат:/вопрос?", Items(message));
         using var json = JsonDocument.Parse(await File.ReadAllTextAsync(result.Path));
         var item = json.RootElement[0];
-        Assert.That(item.EnumerateObject().Select(p => p.Name), Is.EqualTo(new[] { "time", "sender", "text" }));
+        Assert.That(item.EnumerateObject().Select(p => p.Name), Is.EqualTo(new[] { "id", "replyToMessageId", "time", "sender", "text" }));
+        Assert.That(item.GetProperty("id").GetInt32(), Is.EqualTo(125));
+        Assert.That(item.GetProperty("replyToMessageId").GetInt32(), Is.EqualTo(120));
         Assert.That(item.GetProperty("time").GetDateTimeOffset(), Is.EqualTo(message.Time));
         Assert.That(item.GetProperty("sender").GetString(), Is.EqualTo(message.Sender));
         Assert.That(item.GetProperty("text").GetString(), Is.EqualTo(message.Text));
@@ -79,6 +81,53 @@ public sealed class ExporterTests
     [TestCase("a/b:c?", "a_b_c_")]
     public void SanitizesWindowsFileNames(string name, string expected) => Assert.That(JsonExporter.SafeChatName(name), Is.EqualTo(expected));
 
+
+    [Test]
+    public async Task ExportsReplyChainAndExplicitNullForOriginalMessage()
+    {
+        var original = new Message { id = 120, peer_id = new PeerUser { user_id = 2 },
+            date = new DateTime(2026, 11, 6), message = "Original" };
+        var reply = new Message { id = 125, peer_id = original.peer_id, date = original.date,
+            message = "Reply", reply_to = new MessageReplyHeader { reply_to_msg_id = 120, reply_to_top_id = 100 } };
+        var result = await JsonExporter.ExportAsync(directory, "Replies", Items(
+            TelegramHistory.Map(reply, new User(), _ => null),
+            TelegramHistory.Map(original, new User(), _ => null)));
+        using var json = JsonDocument.Parse(await File.ReadAllTextAsync(result.Path));
+        Assert.That(json.RootElement[0].GetProperty("id").GetInt32(), Is.EqualTo(125));
+        Assert.That(json.RootElement[0].GetProperty("replyToMessageId").GetInt32(),
+            Is.EqualTo(json.RootElement[1].GetProperty("id").GetInt32()));
+        Assert.That(json.RootElement[1].GetProperty("replyToMessageId").ValueKind, Is.EqualTo(JsonValueKind.Null));
+    }
+
+    [Test]
+    public async Task PreservesReplyIdWhenTargetIsMissingFromExport()
+    {
+        var message = new Message { id = 125, peer_id = new PeerUser { user_id = 2 },
+            date = new DateTime(2026, 11, 6), reply_to = new MessageReplyHeader { reply_to_msg_id = 120 } };
+        var result = await JsonExporter.ExportAsync(directory, "Missing target",
+            Items(TelegramHistory.Map(message, new User(), _ => null)));
+        using var json = JsonDocument.Parse(await File.ReadAllTextAsync(result.Path));
+        Assert.That(json.RootElement.GetArrayLength(), Is.EqualTo(1));
+        Assert.That(json.RootElement[0].GetProperty("replyToMessageId").GetInt32(), Is.EqualTo(120));
+    }
+
+    [Test]
+    public void ThreadRootAloneDoesNotBecomeReplyTarget()
+    {
+        var message = new Message { id = 125, peer_id = new PeerUser { user_id = 2 },
+            date = new DateTime(2026, 11, 6), reply_to = new MessageReplyHeader { reply_to_top_id = 100 } };
+        Assert.That(TelegramHistory.Map(message, new User(), _ => null).ReplyToMessageId, Is.Null);
+    }
+
+    [Test]
+    public void StoryReplyDoesNotBecomeMessageReply()
+    {
+        var message = new Message { id = 125, peer_id = new PeerUser { user_id = 2 },
+            date = new DateTime(2026, 11, 6), reply_to = new MessageReplyStoryHeader
+            { peer = new PeerUser { user_id = 2 }, story_id = 120 } };
+        Assert.That(TelegramHistory.Map(message, new User(), _ => null).ReplyToMessageId, Is.Null);
+    }
+
     private static async IAsyncEnumerable<ExportMessage> Items(params ExportMessage[] messages)
     {
         await Task.CompletedTask;
@@ -88,7 +137,7 @@ public sealed class ExporterTests
     private static async IAsyncEnumerable<ExportMessage> Failing()
     {
         await Task.CompletedTask;
-        yield return new ExportMessage(DateTimeOffset.UtcNow, "Sender", "Text");
+        yield return new ExportMessage(1, null, DateTimeOffset.UtcNow, "Sender", "Text");
         throw new IOException("Simulated network failure");
     }
 
